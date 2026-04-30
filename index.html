@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Aplikasi analisis spasial sederhana — radius, isochrone, dan heatmap titik fasilitas kesehatan."
+    />
+    <meta name="author" content="Fauzan Nurrachman" />
+    <title>CiviTrack Mini — Spatial Analysis</title>
+
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+    />
+    <link rel="preconnect" href="https://tile.openstreetmap.org" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">CT</div>
+        <div>
+          <h1>CiviTrack Mini</h1>
+          <p>Spatial analysis</p>
+        </div>
+      </div>
+      <div class="search">
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Cari lokasi (Nominatim OSM)…"
+          autocomplete="off"
+        />
+        <button id="searchBtn" type="button" title="Cari">Cari</button>
+      </div>
+      <div class="stats">
+        <div class="stat-item">
+          <span class="stat-num" id="statTotal">0</span>
+          <span class="stat-label">Total titik</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-num" id="statVisible">0</span>
+          <span class="stat-label">Terlihat</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" id="sidebar">
+        <nav class="tool-tabs" role="tablist" aria-label="Pilih alat analisis">
+          <button
+            class="tool-tab active"
+            data-tool="markers"
+            type="button"
+            role="tab"
+            id="tab-markers"
+            aria-controls="panel-markers"
+            aria-selected="true"
+            tabindex="0"
+          >
+            Titik
+          </button>
+          <button
+            class="tool-tab"
+            data-tool="radius"
+            type="button"
+            role="tab"
+            id="tab-radius"
+            aria-controls="panel-radius"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Radius
+          </button>
+          <button
+            class="tool-tab"
+            data-tool="isochrone"
+            type="button"
+            role="tab"
+            id="tab-isochrone"
+            aria-controls="panel-isochrone"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Isochrone
+          </button>
+          <button
+            class="tool-tab"
+            data-tool="heatmap"
+            type="button"
+            role="tab"
+            id="tab-heatmap"
+            aria-controls="panel-heatmap"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Heatmap
+          </button>
+          <button
+            class="tool-tab"
+            data-tool="route"
+            type="button"
+            role="tab"
+            id="tab-route"
+            aria-controls="panel-route"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Rute
+          </button>
+        </nav>
+
+        <section
+          class="panel"
+          id="panel-markers"
+          role="tabpanel"
+          aria-labelledby="tab-markers"
+          tabindex="0"
+        >
+          <h2>Titik Lokasi</h2>
+          <p class="hint">
+            Klik marker pada peta untuk detail. Marker otomatis dikelompokkan
+            saat zoom rendah.
+          </p>
+          <label class="switch">
+            <input type="checkbox" id="toggleMarkers" checked />
+            <span>Tampilkan marker</span>
+          </label>
+          <div class="legend">
+            <h3>Legenda</h3>
+            <div class="legend-row">
+              <span class="dot dot-red"></span> Rumah Sakit Umum
+            </div>
+            <div class="legend-row">
+              <span class="dot dot-blue"></span> Klinik / Puskesmas
+            </div>
+            <div class="legend-row">
+              <span class="dot dot-green"></span> Apotek / Lainnya
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="panel hidden"
+          id="panel-radius"
+          role="tabpanel"
+          aria-labelledby="tab-radius"
+          tabindex="0"
+        >
+          <h2>Analisis Radius</h2>
+          <p class="hint">
+            Klik di peta untuk menentukan titik pusat. Lalu atur radius.
+          </p>
+          <label class="range-label">
+            Radius: <b id="radiusValue">2.0</b> km
+            <input
+              type="range"
+              id="radiusSlider"
+              min="0.2"
+              max="20"
+              step="0.1"
+              value="2"
+            />
+          </label>
+          <div class="result-card orange">
+            <div class="result-num">
+              <span id="radiusCount">0</span> <small>titik</small>
+            </div>
+            <div class="result-label">
+              dalam radius <span id="radiusKmText">2.0</span> km
+            </div>
+          </div>
+          <button class="btn btn-ghost" id="resetRadius" type="button">
+            Reset titik pusat
+          </button>
+          <ul class="result-list" id="radiusList"></ul>
+        </section>
+
+        <section
+          class="panel hidden"
+          id="panel-isochrone"
+          role="tabpanel"
+          aria-labelledby="tab-isochrone"
+          tabindex="0"
+        >
+          <h2>Analisis Isochrone</h2>
+          <p class="hint">
+            Klik di peta untuk menentukan titik. Pilih moda dan waktu maksimum.
+          </p>
+          <div class="seg">
+            <button
+              class="seg-btn active"
+              data-profile="motorcycle"
+              type="button"
+            >
+              Motor
+            </button>
+            <button class="seg-btn" data-profile="car" type="button">
+              Mobil
+            </button>
+            <button class="seg-btn" data-profile="foot" type="button">
+              Jalan
+            </button>
+          </div>
+          <label class="range-label">
+            Waktu: <b id="isoMinutesValue">10</b> menit
+            <input
+              type="range"
+              id="isoMinutes"
+              min="5"
+              max="60"
+              step="5"
+              value="10"
+            />
+          </label>
+          <div class="result-card purple">
+            <div class="result-num">
+              <span id="isoCount">0</span> <small>titik</small>
+            </div>
+            <div class="result-label">
+              tercakup dalam <span id="isoMinText">10</span> menit
+            </div>
+          </div>
+          <p class="hint" id="isoStatus">Belum ada titik dipilih.</p>
+          <button class="btn btn-ghost" id="resetIso" type="button">
+            Reset
+          </button>
+          <ul class="result-list" id="isoList"></ul>
+        </section>
+
+        <section
+          class="panel hidden"
+          id="panel-heatmap"
+          role="tabpanel"
+          aria-labelledby="tab-heatmap"
+          tabindex="0"
+        >
+          <h2>Heatmap</h2>
+          <p class="hint">
+            Visualisasikan kepadatan titik sebagai gradien panas.
+          </p>
+          <label class="switch">
+            <input type="checkbox" id="toggleHeatmap" />
+            <span>Aktifkan heatmap</span>
+          </label>
+          <label class="range-label">
+            Radius: <b id="heatRadiusVal">25</b> px
+            <input
+              type="range"
+              id="heatRadius"
+              min="5"
+              max="60"
+              step="1"
+              value="25"
+            />
+          </label>
+          <label class="range-label">
+            Intensitas: <b id="heatIntVal">1.0</b>
+            <input
+              type="range"
+              id="heatIntensity"
+              min="0.1"
+              max="3"
+              step="0.1"
+              value="1"
+            />
+          </label>
+          <div class="legend gradient">
+            <h3>Skala Kepadatan</h3>
+            <div class="grad-bar"></div>
+            <div class="grad-labels">
+              <span>rendah</span><span>tinggi</span>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="panel hidden"
+          id="panel-route"
+          role="tabpanel"
+          aria-labelledby="tab-route"
+          tabindex="0"
+        >
+          <h2>Rute &amp; Estimasi Waktu</h2>
+          <p class="hint">
+            Atur titik asal (klik tombol → lalu klik peta), lalu klik salah satu
+            marker untuk dijadikan tujuan. Routing memakai OSRM publik.
+          </p>
+          <div class="row">
+            <button class="btn btn-primary" id="setOrigin" type="button">
+              Set titik asal
+            </button>
+            <button class="btn btn-ghost" id="useGeolocation" type="button">
+              Lokasi saya
+            </button>
+          </div>
+          <div class="seg seg-route">
+            <button class="seg-btn active" data-osrm="driving" type="button">
+              Mobil
+            </button>
+            <button class="seg-btn" data-osrm="cycling" type="button">
+              Sepeda
+            </button>
+            <button class="seg-btn" data-osrm="foot" type="button">
+              Jalan
+            </button>
+          </div>
+          <div class="route-card">
+            <div class="route-row">
+              <span>Asal</span><b id="routeOrigin">–</b>
+            </div>
+            <div class="route-row">
+              <span>Tujuan</span><b id="routeDest">–</b>
+            </div>
+            <div class="route-row big">
+              <span>Jarak</span><b id="routeDistance">–</b>
+            </div>
+            <div class="route-row big">
+              <span>Estimasi waktu</span><b id="routeDuration">–</b>
+            </div>
+          </div>
+          <button class="btn btn-ghost" id="clearRoute" type="button">
+            Bersihkan rute
+          </button>
+        </section>
+
+        <footer class="side-footer">
+          <p>© 2026 Fauzan Nurrachman .</p>
+        </footer>
+      </aside>
+
+      <section class="map-wrap">
+        <div id="map"></div>
+        <button
+          class="sidebar-toggle"
+          id="sidebarToggle"
+          type="button"
+          title="Toggle panel"
+        >
+          ☰
+        </button>
+        <div class="basemap-switch" id="basemapSwitch">
+          <button class="bm active" data-bm="osm" type="button">Street</button>
+          <button class="bm" data-bm="carto-light" type="button">Light</button>
+          <button class="bm" data-bm="carto-dark" type="button">Dark</button>
+          <button class="bm" data-bm="esri-sat" type="button">Satelit</button>
+        </div>
+        <div class="map-toast" id="mapToast"></div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
