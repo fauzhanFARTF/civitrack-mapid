@@ -9,6 +9,7 @@
   --primary: #3b82f6;
   --primary-dark: #1d4ed8;
   --orange: #f97316;
+  --yellow: #eab308;
   --purple: #8b5cf6;
   --green: #10b981;
   --red: #ef4444;
@@ -182,6 +183,7 @@ body {
 }
 .result-card.orange { background: linear-gradient(135deg, #fff7ed, #ffedd5); }
 .result-card.purple { background: linear-gradient(135deg, #faf5ff, #ede9fe); }
+.result-card.teal { background: linear-gradient(135deg, #ecfeff, #cffafe); }
 .result-num { font-size: 28px; font-weight: 800; color: var(--text); }
 .result-num small { font-size: 12px; font-weight: 600; color: var(--text-soft); }
 .result-label { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
@@ -231,6 +233,7 @@ body {
 .seg-btn:hover { background: var(--surface-2); }
 .seg-btn.active { background: var(--purple); color: white; }
 .seg.seg-route .seg-btn.active { background: var(--primary); }
+.seg.seg-measure .seg-btn.active { background: #0891b2; }
 
 .result-list {
   list-style: none;
@@ -287,9 +290,44 @@ body {
 .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .legend-row:last-child { margin-bottom: 0; }
 .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+.filter-legend { display: flex; flex-direction: column; gap: 2px; }
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 5px 4px;
+  border-radius: 6px;
+  transition: background .12s ease;
+  -webkit-user-select: none; -moz-user-select: none; user-select: none;
+}
+.filter-row:hover { background: rgba(255,255,255,.5); }
+.filter-row input[type="checkbox"] {
+  width: 16px; height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  margin: 0;
+}
+.filter-row .filter-label { flex: 1; color: var(--text); }
+.filter-row .filter-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--text-mute);
+  min-width: 22px;
+  text-align: right;
+}
+.filter-row input:not(:checked) ~ .filter-label,
+.filter-row input:not(:checked) ~ .filter-count { color: var(--text-mute); text-decoration: line-through; }
+.filter-row input:not(:checked) ~ .dot { opacity: .35; }
 .dot-red { background: var(--red); }
 .dot-blue { background: var(--primary); }
 .dot-green { background: var(--green); }
+.dot-orange { background: var(--orange); }
+.dot-yellow { background: var(--yellow); }
 
 .legend.gradient .grad-bar {
   height: 12px;

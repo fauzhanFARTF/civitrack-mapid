@@ -110,6 +110,18 @@
           >
             Rute
           </button>
+          <button
+            class="tool-tab"
+            data-tool="measure"
+            type="button"
+            role="tab"
+            id="tab-measure"
+            aria-controls="panel-measure"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Ukur
+          </button>
         </nav>
 
         <section
@@ -128,17 +140,26 @@
             <input type="checkbox" id="toggleMarkers" checked />
             <span>Tampilkan marker</span>
           </label>
-          <div class="legend">
-            <h3>Legenda</h3>
-            <div class="legend-row">
-              <span class="dot dot-red"></span> Rumah Sakit Umum
-            </div>
-            <div class="legend-row">
-              <span class="dot dot-blue"></span> Klinik / Puskesmas
-            </div>
-            <div class="legend-row">
-              <span class="dot dot-green"></span> Apotek / Lainnya
-            </div>
+          <div class="legend filter-legend">
+            <h3>Tipe Fasilitas</h3>
+            <label class="filter-row">
+              <input type="checkbox" data-filter="hospital" checked />
+              <span class="dot dot-red"></span>
+              <span class="filter-label">Rumah Sakit Umum</span>
+              <b class="filter-count" data-count="hospital">0</b>
+            </label>
+            <label class="filter-row">
+              <input type="checkbox" data-filter="clinic" checked />
+              <span class="dot dot-yellow"></span>
+              <span class="filter-label">Klinik / Puskesmas</span>
+              <b class="filter-count" data-count="clinic">0</b>
+            </label>
+            <label class="filter-row">
+              <input type="checkbox" data-filter="pharmacy" checked />
+              <span class="dot dot-green"></span>
+              <span class="filter-label">Apotek / Lainnya</span>
+              <b class="filter-count" data-count="pharmacy">0</b>
+            </label>
           </div>
         </section>
 
@@ -297,13 +318,13 @@
             </button>
           </div>
           <div class="seg seg-route">
-            <button class="seg-btn active" data-osrm="driving" type="button">
+            <button class="seg-btn active" data-profile="car" type="button">
               Mobil
             </button>
-            <button class="seg-btn" data-osrm="cycling" type="button">
+            <button class="seg-btn" data-profile="bike" type="button">
               Sepeda
             </button>
-            <button class="seg-btn" data-osrm="foot" type="button">
+            <button class="seg-btn" data-profile="foot" type="button">
               Jalan
             </button>
           </div>
@@ -326,6 +347,41 @@
           </button>
         </section>
 
+        <section
+          class="panel hidden"
+          id="panel-measure"
+          role="tabpanel"
+          aria-labelledby="tab-measure"
+          tabindex="0"
+        >
+          <h2>Ukur Jarak &amp; Luas</h2>
+          <p class="hint">
+            Pilih mode lalu klik berurutan di peta untuk menambah titik. Klik
+            Reset untuk memulai ulang.
+          </p>
+          <div class="seg seg-measure">
+            <button class="seg-btn active" data-measure="length" type="button">
+              Jarak
+            </button>
+            <button class="seg-btn" data-measure="area" type="button">
+              Area
+            </button>
+          </div>
+          <div class="result-card teal">
+            <div class="result-num">
+              <span id="measureValue">0</span>
+              <small id="measureUnit">m</small>
+            </div>
+            <div class="result-label" id="measureLabel">Panjang garis</div>
+          </div>
+          <p class="hint" id="measureHint">
+            Klik di peta untuk titik pertama.
+          </p>
+          <button class="btn btn-ghost" id="resetMeasure" type="button">
+            Reset
+          </button>
+        </section>
+
         <footer class="side-footer">
           <p>© 2026 Fauzan Nurrachman .</p>
         </footer>
@@ -342,8 +398,8 @@
           ☰
         </button>
         <div class="basemap-switch" id="basemapSwitch">
-          <button class="bm active" data-bm="osm" type="button">Street</button>
-          <button class="bm" data-bm="carto-light" type="button">Light</button>
+          <button class="bm" data-bm="osm" type="button">Street</button>
+          <button class="bm active" data-bm="carto-light" type="button">Light</button>
           <button class="bm" data-bm="carto-dark" type="button">Dark</button>
           <button class="bm" data-bm="esri-sat" type="button">Satelit</button>
         </div>

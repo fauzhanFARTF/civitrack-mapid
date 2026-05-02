@@ -12,12 +12,13 @@
     mapidApiKey: '69e7cccae8dfc566983dd1c9',
     mapidBaseUrl: 'https://routing.mapid.io',
     osrmBaseUrl: 'https://router.project-osrm.org',
+    osmRoutingBaseUrl: 'https://routing.openstreetmap.de',
     nominatimBaseUrl: 'https://nominatim.openstreetmap.org',
   };
 
   const TYPE_META = {
     hospital: { color: '#ef4444', label: 'RS Umum' },
-    clinic: { color: '#3b82f6', label: 'Klinik / Puskesmas' },
+    clinic: { color: '#eab308', label: 'Klinik / Puskesmas' },
     pharmacy: { color: '#10b981', label: 'Apotek' },
   };
 
@@ -597,15 +598,20 @@
     route: {
       origin: null,
       dest: null,
-      profile: 'driving',
+      profile: 'car',
       originMarker: null,
       destMarker: null,
       lastRoute: null,
     },
+    measure: {
+      mode: 'length',
+      points: [],
+    },
     heatmap: { active: false },
+    filters: { hospital: true, clinic: true, pharmacy: true },
     showMarkers: true,
     cluster: true,
-    activeBasemap: 'osm',
+    activeBasemap: 'carto-light',
     activeTool: 'markers',
   };
 
@@ -662,7 +668,94 @@
     'top-right',
   );
 
-  map.on('load', () => {
+  // --- Circular flat icons (raster from inline SVG)
+  // Base = lingkaran datar berwarna sesuai tipe, glyph putih di tengah:
+  // cross (RS, merah), heart (klinik, oranye), capsule (apotek, hijau).
+  // Anda bisa mengganti string `glyph` dengan markup SVG dari flaticon yang
+  // sudah didownload (pakai fill="#fff" agar kontras dengan lingkaran).
+  const PIN_DEFS = {
+    'pin-hospital': {
+      color: '#ef4444',
+      glyph:
+        '<rect x="10.4" y="6.6" width="3.2" height="10.8" rx="0.7" fill="#fff"/>' +
+        '<rect x="6.6" y="10.4" width="10.8" height="3.2" rx="0.7" fill="#fff"/>',
+    },
+    'pin-clinic': {
+      color: '#eab308',
+      glyph:
+        '<path fill="#fff" d="M12 16.6 C7.2 13.7 6.6 10.7 7.8 9 C9 7.4 11.1 7.8 12 9.4 C12.9 7.8 15 7.4 16.2 9 C17.4 10.7 16.8 13.7 12 16.6 Z"/>',
+    },
+    'pin-pharmacy': {
+      color: '#10b981',
+      glyph:
+        '<g transform="translate(12 12) rotate(-35)">' +
+        '<rect x="-5.4" y="-1.9" width="10.8" height="3.8" rx="1.9" fill="#fff"/>' +
+        '<line x1="0" y1="-1.9" x2="0" y2="1.9" stroke="#10b981" stroke-width="0.6"/>' +
+        '</g>',
+    },
+  };
+
+  function createPinImage(def) {
+    return new Promise((resolve) => {
+      const w = 48,
+        h = 48;
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 24 24">` +
+        `<circle cx="12" cy="12" r="10.2" fill="${def.color}" stroke="#ffffff" stroke-width="1.4"/>` +
+        def.glyph +
+        `</svg>`;
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        resolve(ctx.getImageData(0, 0, w, h));
+      };
+      img.onerror = () => resolve(null);
+      img.src =
+        'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+  }
+
+  async function ensurePinImages() {
+    for (const [name, def] of Object.entries(PIN_DEFS)) {
+      if (map.hasImage(name)) continue;
+      const img = await createPinImage(def);
+      if (img && !map.hasImage(name)) map.addImage(name, img);
+    }
+  }
+
+  function visibleFeatures() {
+    return state.points.features.filter(
+      (f) => state.filters[f.properties.type] !== false,
+    );
+  }
+
+  function refreshPoints() {
+    const fc = {
+      type: 'FeatureCollection',
+      features: visibleFeatures(),
+    };
+    map.getSource('points')?.setData(fc);
+    updateVisibleStat();
+    if (state.radius.center) updateRadiusResults();
+    if (state.iso.geojson) updateIsochroneResults(state.iso.geojson);
+  }
+
+  function updateFilterCounts() {
+    for (const t of Object.keys(state.filters)) {
+      const n = state.points.features.filter(
+        (f) => f.properties.type === t,
+      ).length;
+      const el = document.querySelector(`[data-count="${t}"]`);
+      if (el) el.textContent = n;
+    }
+  }
+
+  map.on('load', async () => {
+    await ensurePinImages();
     addAllSourcesAndLayers();
     state.points.features.forEach(
       (f) =>
@@ -670,8 +763,12 @@
           TYPE_META[f.properties.type]?.label ?? f.properties.type),
     );
     updateStats();
+    updateFilterCounts();
+    updateVisibleStat();
     bindMapInteractions();
   });
+
+  map.on('moveend', updateVisibleStat);
 
   // Re-add overlays when style/basemap changes
   map.on('style.load', () => {
@@ -682,19 +779,25 @@
     if (state.radius.center) drawRadiusCircle();
     if (state.iso.geojson) drawIsochrone(state.iso.geojson);
     if (state.route.lastRoute) drawRouteLine(state.route.lastRoute);
+    if (state.measure.points.length) updateMeasure();
+    updateVisibleStat();
   });
 
   function addAllSourcesAndLayers() {
+    const pointData = {
+      type: 'FeatureCollection',
+      features: visibleFeatures(),
+    };
     if (!map.getSource('points')) {
       map.addSource('points', {
         type: 'geojson',
-        data: state.points,
+        data: pointData,
         cluster: state.cluster,
         clusterRadius: 50,
         clusterMaxZoom: 14,
       });
     } else {
-      map.getSource('points').setData(state.points);
+      map.getSource('points').setData(pointData);
     }
 
     if (!map.getLayer('clusters')) {
@@ -748,24 +851,25 @@
     if (!map.getLayer('unclustered')) {
       map.addLayer({
         id: 'unclustered',
-        type: 'circle',
+        type: 'symbol',
         source: 'points',
         filter: ['!', ['has', 'point_count']],
-        paint: {
-          'circle-color': [
+        layout: {
+          'icon-image': [
             'match',
             ['get', 'type'],
             'hospital',
-            '#ef4444',
+            'pin-hospital',
             'clinic',
-            '#3b82f6',
+            'pin-clinic',
             'pharmacy',
-            '#10b981',
-            '#6b7280',
+            'pin-pharmacy',
+            'pin-pharmacy',
           ],
-          'circle-radius': 7,
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff',
+          'icon-size': 0.4,
+          'icon-anchor': 'center',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       });
     }
@@ -853,6 +957,46 @@
         'unclustered',
       );
     }
+    if (!map.getSource('measure')) {
+      map.addSource('measure', { type: 'geojson', data: emptyFC() });
+      map.addLayer(
+        {
+          id: 'measure-fill',
+          type: 'fill',
+          source: 'measure',
+          filter: ['==', ['get', 'kind'], 'polygon'],
+          paint: { 'fill-color': '#06b6d4', 'fill-opacity': 0.18 },
+        },
+        'unclustered',
+      );
+      map.addLayer(
+        {
+          id: 'measure-line',
+          type: 'line',
+          source: 'measure',
+          filter: ['==', ['get', 'kind'], 'line'],
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': '#0891b2',
+            'line-width': 3,
+            'line-dasharray': [1.5, 1.5],
+          },
+        },
+        'unclustered',
+      );
+      map.addLayer({
+        id: 'measure-points',
+        type: 'circle',
+        source: 'measure',
+        filter: ['==', ['get', 'kind'], 'point'],
+        paint: {
+          'circle-color': '#0891b2',
+          'circle-radius': 5,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+    }
     if (!map.getSource('route')) {
       map.addSource('route', { type: 'geojson', data: emptyFC() });
       map.addLayer({
@@ -907,6 +1051,9 @@
   // -------- Map interactions (popups, etc.) --------
   function bindMapInteractions() {
     map.on('click', 'unclustered', (e) => {
+      // Saat sedang menentukan titik (radius/iso/measure/route-origin),
+      // klik di atas marker tetap dipakai sebagai titik input — bukan popup.
+      if (state.interactionMode !== 'none') return;
       const f = e.features?.[0];
       if (!f) return;
       openPopup(f);
@@ -937,11 +1084,11 @@
 
     // Single canvas-click handler routes by interaction mode
     map.on('click', (e) => {
-      // Ignore if click is on a feature layer (handled above)
       const features = map.queryRenderedFeatures(e.point, {
         layers: ['unclustered', 'clusters'],
       });
-      if (features.length) return;
+      // Saat tidak ada mode aktif, marker click sudah ditangani di atas.
+      if (features.length && state.interactionMode === 'none') return;
       handleCanvasClick(e.lngLat);
     });
   }
@@ -957,7 +1104,11 @@
         <button class="popup-route" data-lng="${c[0]}" data-lat="${c[1]}" data-name="${escapeHtml(p.name)}">Rute ke sini</button>
         <button class="alt popup-iso" data-lng="${c[0]}" data-lat="${c[1]}">Isochrone</button>
       </div>`;
-    const popup = new maplibregl.Popup({ offset: 14, closeButton: true })
+    const popup = new maplibregl.Popup({
+      offset: 14,
+      anchor: 'bottom',
+      closeButton: true,
+    })
       .setLngLat(c)
       .setHTML(html)
       .addTo(map);
@@ -1002,6 +1153,9 @@
       $('#setOrigin').classList.remove('armed');
       $('#setOrigin').textContent = 'Set titik asal';
       if (state.route.dest) fetchAndRenderRoute();
+    } else if (state.interactionMode === 'measure') {
+      state.measure.points.push(lnglat);
+      updateMeasure();
     }
   }
 
@@ -1023,7 +1177,16 @@
   function updateStats() {
     const total = state.points.features.length;
     $('#statTotal').textContent = total;
-    $('#statVisible').textContent = total;
+  }
+
+  function updateVisibleStat() {
+    const bounds = map.getBounds();
+    let count = 0;
+    for (const f of visibleFeatures()) {
+      const [lng, lat] = f.geometry.coordinates;
+      if (bounds.contains([lng, lat])) count++;
+    }
+    $('#statVisible').textContent = count;
   }
 
   // -------- Tools sidebar --------
@@ -1031,10 +1194,12 @@
     radius: 'Klik di peta untuk menentukan titik pusat radius',
     isochrone: 'Klik di peta untuk menentukan titik isochrone',
     route: 'Pilih titik asal lalu klik salah satu marker tujuan',
+    measure: 'Klik di peta untuk menambah titik ukur',
   };
   const INTERACTION_FOR_TOOL = {
     radius: 'radius',
     isochrone: 'isochrone',
+    measure: 'measure',
   };
 
   function switchTool(name) {
@@ -1065,6 +1230,13 @@
   $('#toggleMarkers').addEventListener('change', (e) => {
     state.showMarkers = e.target.checked;
     setMarkersVisible(state.showMarkers);
+  });
+
+  $$('input[data-filter]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      state.filters[cb.dataset.filter] = cb.checked;
+      refreshPoints();
+    });
   });
 
   // -------- Radius tool --------
@@ -1099,7 +1271,7 @@
       return;
     }
     const origin = turf.point(c);
-    const inside = state.points.features
+    const inside = visibleFeatures()
       .map((f) => ({
         f,
         d: turf.distance(origin, turf.point(f.geometry.coordinates), {
@@ -1256,7 +1428,7 @@
       $('#isoList').innerHTML = '';
       return;
     }
-    const inside = state.points.features
+    const inside = visibleFeatures()
       .map((f) => ({
         f,
         d: turf.distance(
@@ -1303,7 +1475,7 @@
     b.addEventListener('click', () => {
       $$('#panel-route .seg-btn').forEach((x) => x.classList.remove('active'));
       b.classList.add('active');
-      state.route.profile = b.dataset.osrm;
+      state.route.profile = b.dataset.profile;
       if (state.route.origin && state.route.dest) fetchAndRenderRoute();
     });
   });
@@ -1388,42 +1560,106 @@
     if (!state.route.origin || !state.route.dest) return;
     const o = state.route.origin;
     const d = state.route.dest;
+    const profile = state.route.profile;
     $('#routeDistance').textContent = '…';
     $('#routeDuration').textContent = '…';
+
+    let result = null;
+
+    // Primary: MapID routing (GraphHopper-style) — sama provider dengan isochrone
     try {
-      const url = `${CONFIG.osrmBaseUrl}/route/v1/${state.route.profile}/${o[0]},${o[1]};${d[0]},${d[1]}?overview=full&geometries=geojson`;
+      const url =
+        `${CONFIG.mapidBaseUrl}/route?key=${CONFIG.mapidApiKey}` +
+        `&point=${o[1]},${o[0]}&point=${d[1]},${d[0]}` +
+        `&profile=${profile}&type=json&points_encoded=false&instructions=false`;
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const route = data.routes?.[0];
-      if (!route) throw new Error('No route');
-      drawRouteLine(route.geometry);
-      state.route.lastRoute = route.geometry;
-      $('#routeDistance').textContent = fmtKm(route.distance / 1000);
-      $('#routeDuration').textContent = fmtMin(route.duration);
+      if (res.ok) {
+        const data = await res.json();
+        const path = data.paths?.[0];
+        if (path && path.points) {
+          result = {
+            geometry: path.points,
+            distance: path.distance,
+            duration: (path.time ?? 0) / 1000,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('MapID routing failed', err);
+    }
+
+    // Secondary: OSM Routing FOSSGIS (open-source OSRM, semua profil tersedia)
+    // Endpoints: /routed-car, /routed-bike, /routed-foot — format respons OSRM standar.
+    if (!result) {
+      const osmProfile =
+        profile === 'bike'
+          ? 'routed-bike'
+          : profile === 'foot'
+            ? 'routed-foot'
+            : 'routed-car';
       try {
-        const bbox = turf.bbox(route.geometry);
+        const url = `${CONFIG.osmRoutingBaseUrl}/${osmProfile}/route/v1/driving/${o[0]},${o[1]};${d[0]},${d[1]}?overview=full&geometries=geojson`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const route = data.routes?.[0];
+          if (route) {
+            result = {
+              geometry: route.geometry,
+              distance: route.distance,
+              duration: route.duration,
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('OSM routing failed', err);
+      }
+    }
+
+    // Tertiary: project-osrm.org (driving saja) — fallback terakhir untuk car
+    if (!result && profile === 'car') {
+      try {
+        const url = `${CONFIG.osrmBaseUrl}/route/v1/driving/${o[0]},${o[1]};${d[0]},${d[1]}?overview=full&geometries=geojson`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const route = data.routes?.[0];
+          if (route) {
+            result = {
+              geometry: route.geometry,
+              distance: route.distance,
+              duration: route.duration,
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('OSRM routing failed', err);
+      }
+    }
+
+    if (result) {
+      drawRouteLine(result.geometry);
+      state.route.lastRoute = result.geometry;
+      $('#routeDistance').textContent = fmtKm(result.distance / 1000);
+      $('#routeDuration').textContent = fmtMin(result.duration);
+      try {
+        const bbox = turf.bbox(result.geometry);
         map.fitBounds(bbox, { padding: 80, duration: 700 });
       } catch {}
-    } catch (err) {
-      console.error(err);
-      // Fallback: haversine + asumsi kecepatan
-      const km = turf.distance(turf.point(o), turf.point(d), {
-        units: 'kilometers',
-      });
-      const speed =
-        state.route.profile === 'foot'
-          ? 4.5
-          : state.route.profile === 'cycling'
-            ? 15
-            : 35;
-      const sec = (km / speed) * 3600;
-      $('#routeDistance').textContent = fmtKm(km) + ' (lurus)';
-      $('#routeDuration').textContent = '~' + fmtMin(sec);
-      drawRouteLine({ type: 'LineString', coordinates: [o, d] });
-      state.route.lastRoute = { type: 'LineString', coordinates: [o, d] };
-      toast('Routing OSRM gagal, pakai estimasi garis lurus.');
+      return;
     }
+
+    // Final fallback: haversine + asumsi kecepatan
+    const km = turf.distance(turf.point(o), turf.point(d), {
+      units: 'kilometers',
+    });
+    const speed = profile === 'foot' ? 4.5 : profile === 'bike' ? 15 : 35;
+    const sec = (km / speed) * 3600;
+    $('#routeDistance').textContent = fmtKm(km) + ' (lurus)';
+    $('#routeDuration').textContent = '~' + fmtMin(sec);
+    drawRouteLine({ type: 'LineString', coordinates: [o, d] });
+    state.route.lastRoute = { type: 'LineString', coordinates: [o, d] };
+    toast('Routing gagal, pakai estimasi garis lurus.');
   }
 
   function drawRouteLine(geometry) {
@@ -1432,6 +1668,102 @@
       features: [{ type: 'Feature', properties: {}, geometry }],
     };
     map.getSource('route')?.setData(fc);
+  }
+
+  // -------- Measure tool --------
+  $$('#panel-measure .seg-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      $$('#panel-measure .seg-btn').forEach((x) =>
+        x.classList.remove('active'),
+      );
+      b.classList.add('active');
+      state.measure.mode = b.dataset.measure;
+      updateMeasure();
+    });
+  });
+
+  $('#resetMeasure').addEventListener('click', () => {
+    state.measure.points = [];
+    map.getSource('measure')?.setData(emptyFC());
+    updateMeasure();
+  });
+
+  function updateMeasure() {
+    const pts = state.measure.points;
+    const features = pts.map((p) => ({
+      type: 'Feature',
+      properties: { kind: 'point' },
+      geometry: { type: 'Point', coordinates: p },
+    }));
+
+    let lengthKm = 0;
+    let areaM2 = 0;
+
+    if (state.measure.mode === 'length' && pts.length >= 2) {
+      features.push({
+        type: 'Feature',
+        properties: { kind: 'line' },
+        geometry: { type: 'LineString', coordinates: pts },
+      });
+      lengthKm = turf.length(turf.lineString(pts), { units: 'kilometers' });
+    }
+
+    if (state.measure.mode === 'area' && pts.length >= 2) {
+      const ring = pts.length >= 3 ? [...pts, pts[0]] : pts;
+      features.push({
+        type: 'Feature',
+        properties: { kind: 'line' },
+        geometry: { type: 'LineString', coordinates: ring },
+      });
+      if (pts.length >= 3) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'polygon' },
+          geometry: { type: 'Polygon', coordinates: [ring] },
+        });
+        areaM2 = turf.area(turf.polygon([ring]));
+      }
+    }
+
+    map.getSource('measure')?.setData({
+      type: 'FeatureCollection',
+      features,
+    });
+
+    renderMeasureResult(lengthKm, areaM2);
+  }
+
+  function renderMeasureResult(lengthKm, areaM2) {
+    const pts = state.measure.points;
+    if (state.measure.mode === 'length') {
+      $('#measureLabel').textContent = 'Panjang garis';
+      if (lengthKm < 1) {
+        $('#measureValue').textContent = (lengthKm * 1000).toFixed(1);
+        $('#measureUnit').textContent = 'm';
+      } else {
+        $('#measureValue').textContent = lengthKm.toFixed(2);
+        $('#measureUnit').textContent = 'km';
+      }
+      $('#measureHint').textContent =
+        pts.length === 0
+          ? 'Klik di peta untuk titik pertama.'
+          : pts.length === 1
+            ? 'Klik titik berikutnya untuk mulai mengukur.'
+            : `${pts.length} titik — klik untuk menambah segmen.`;
+    } else {
+      $('#measureLabel').textContent = 'Luas area';
+      if (areaM2 < 1e6) {
+        $('#measureValue').textContent = areaM2.toFixed(0);
+        $('#measureUnit').textContent = 'm²';
+      } else {
+        $('#measureValue').textContent = (areaM2 / 1e6).toFixed(2);
+        $('#measureUnit').textContent = 'km²';
+      }
+      $('#measureHint').textContent =
+        pts.length < 3
+          ? `Butuh minimal 3 titik (sekarang ${pts.length}).`
+          : `${pts.length} titik — klik untuk memperluas poligon.`;
+    }
   }
 
   // -------- Search (Nominatim) --------
@@ -1462,12 +1794,43 @@
   });
 
   // -------- Basemap switcher --------
+  // Swap basemap in-place agar source/layer custom (points, radius, iso, route,
+  // measure) tidak ikut hilang. setStyle() akan mereset seluruh style.
+  function setBasemap(key) {
+    const bm = BASEMAPS[key] || BASEMAPS.osm;
+    state.activeBasemap = key;
+
+    // Cari layer non-basemap pertama agar basemap tetap di paling bawah
+    const layers = map.getStyle().layers || [];
+    let beforeId = null;
+    for (const l of layers) {
+      if (l.id !== 'basemap-raster') {
+        beforeId = l.id;
+        break;
+      }
+    }
+
+    if (map.getLayer('basemap-raster')) map.removeLayer('basemap-raster');
+    if (map.getSource('basemap-raster')) map.removeSource('basemap-raster');
+
+    map.addSource('basemap-raster', {
+      type: 'raster',
+      tiles: bm.tiles,
+      tileSize: 256,
+      attribution: bm.attribution,
+      maxzoom: 19,
+    });
+    map.addLayer(
+      { id: 'basemap-raster', type: 'raster', source: 'basemap-raster' },
+      beforeId,
+    );
+  }
+
   $$('.bm').forEach((btn) => {
     btn.addEventListener('click', () => {
       $$('.bm').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      state.activeBasemap = btn.dataset.bm;
-      map.setStyle(buildStyle(state.activeBasemap));
+      setBasemap(btn.dataset.bm);
     });
   });
 
